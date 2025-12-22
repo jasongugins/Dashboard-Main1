@@ -1,22 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Navigation } from './Navigation';
 import { Overview } from './views/Overview';
 import { Attribution } from './views/Attribution';
 import { Profitability } from './views/Profitability';
 import { Compliance } from './views/Compliance';
 import { Settings } from './views/Settings';
-import { ViewState } from '../types';
+import { Client, ViewState } from '../types';
 import { Icons } from './ui/Icons';
 
 export const DashboardLayout: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.OVERVIEW);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [clientMenuOpen, setClientMenuOpen] = useState(false);
+
+  const clients: Client[] = [
+    { id: 'gymshark', name: 'GymShark (DTC)', segment: 'Athleisure' },
+    { id: 'nomad', name: 'Nomad Travel Co.', segment: 'Travel' },
+    { id: 'aurora', name: 'Aurora Skincare', segment: 'Beauty' },
+    { id: 'forge', name: 'Forge Tools', segment: 'Hardware' },
+  ];
+
+  const [selectedClients, setSelectedClients] = useState<string[]>([clients[0].id]);
+  const clientMenuRef = useRef<HTMLDivElement>(null);
 
   // Scroll to top whenever the view changes to prevent "carry over" of scroll position
   // into empty/black areas of shorter pages.
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [currentView]);
+
+  // Close client menu on outside click
+  useEffect(() => {
+    if (!clientMenuOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (clientMenuRef.current && !clientMenuRef.current.contains(event.target as Node)) {
+        setClientMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [clientMenuOpen]);
+
+  const toggleClient = (clientId: string) => {
+    setSelectedClients((prev) => {
+      if (prev.includes(clientId)) {
+        if (prev.length === 1) return prev; // keep at least one selected
+        return prev.filter((id) => id !== clientId);
+      }
+      return [...prev, clientId];
+    });
+  };
+
+  const selectAll = () => setSelectedClients(clients.map((c) => c.id));
+
+  const selectedClientNames = clients
+    .filter((client) => selectedClients.includes(client.id))
+    .map((client) => client.name);
+
+  const clientSummary = () => {
+    if (selectedClients.length === clients.length) return 'All clients';
+    if (selectedClientNames.length <= 2) return selectedClientNames.join(', ');
+    const [first, second, ...rest] = selectedClientNames;
+    return `${first}, ${second} +${rest.length}`;
+  };
 
   const renderView = () => {
     switch (currentView) {
@@ -70,9 +116,54 @@ export const DashboardLayout: React.FC = () => {
           <div className="flex items-center gap-4 text-sm">
              <span className="text-slate-400">Dashboards</span>
              <span className="text-slate-300">/</span>
-             <div className="flex items-center gap-2 px-2 py-1 bg-white border border-slate-200 rounded-md shadow-sm cursor-pointer hover:border-slate-300 transition-colors">
-                <span className="font-medium text-slate-700">Client: GymShark (DTC)</span>
-                <Icons.ChevronDown size={14} className="text-slate-400" />
+             <div className="relative" ref={clientMenuRef}>
+                <button
+                  onClick={() => setClientMenuOpen((open) => !open)}
+                  className="flex items-center gap-2 px-2 py-1 bg-white border border-slate-200 rounded-md shadow-sm hover:border-slate-300 transition-colors"
+                >
+                  <span className="font-medium text-slate-700">Clients: {clientSummary()}</span>
+                  <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-100">
+                    {selectedClients.length}
+                  </span>
+                  <Icons.ChevronDown size={14} className={`text-slate-400 transition-transform ${clientMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {clientMenuOpen && (
+                  <div className="absolute mt-2 w-64 bg-white border border-slate-200 rounded-lg shadow-xl p-3 z-20">
+                    <div className="flex items-center justify-between mb-2 text-[11px] text-slate-500">
+                      <span>Select clients</span>
+                      <button onClick={selectAll} className="text-brand-600 hover:text-brand-700 font-semibold">Select all</button>
+                    </div>
+                    <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                      {clients.map((client) => {
+                        const checked = selectedClients.includes(client.id);
+                        return (
+                          <label
+                            key={client.id}
+                            className="flex items-center gap-2 text-sm text-slate-700 px-2 py-1 rounded-md hover:bg-slate-50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleClient(client.id)}
+                              className="accent-brand-600"
+                            />
+                            <div className="flex flex-col leading-tight">
+                              <span className="font-medium">{client.name}</span>
+                              {client.segment && <span className="text-[11px] text-slate-400">{client.segment}</span>}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 text-[11px] text-slate-400 flex items-center gap-2">
+                      <span className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-brand-50 text-brand-600 text-[10px] font-semibold border border-brand-100">
+                        {selectedClients.length}
+                      </span>
+                      selected
+                    </div>
+                  </div>
+                )}
              </div>
           </div>
           
@@ -90,6 +181,17 @@ export const DashboardLayout: React.FC = () => {
         </header>
 
         <div className="p-4 md:p-8 max-w-7xl mx-auto pb-20">
+          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-slate-500">
+            <span className="uppercase tracking-wide text-[10px] text-slate-400 font-semibold">Selected Clients</span>
+            {selectedClientNames.map((name) => (
+              <span
+                key={name}
+                className="px-2 py-1 bg-white border border-slate-200 rounded-full text-slate-600 shadow-sm"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
           {renderView()}
         </div>
       </main>

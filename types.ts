@@ -30,3 +30,9 @@ export interface RiskFactor {
   riskLevel: 'Critical' | 'High' | 'Moderate' | 'Low' | 'Safe';
   details: string;
 }
+
+export interface Client {
+  id: string;
+  name: string;
+  segment?: string;
+}
