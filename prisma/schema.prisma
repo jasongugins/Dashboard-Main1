@@ -15,4 +15,91 @@ model ShopifyCredential {
   apiVersion  String   @default("2024-10")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  orders   Order[]
+  products Product[]
+}
+
+model Order {
+  id                Int       @id @default(autoincrement())
+  shopifyId         String    @unique
+  clientId          String
+  credentialId      Int?
+  name              String
+  currency          String
+  subtotal          Decimal
+  totalPrice        Decimal
+  totalDiscounts    Decimal
+  totalShipping     Decimal
+  totalTax          Decimal
+  netPayment        Decimal
+  landingCost       Decimal?
+  fulfillmentStatus String?
+  financialStatus   String?
+  processedAt       DateTime
+  updatedAt         DateTime
+  createdAt         DateTime  @default(now())
+  orderNumber       Int?
+  customerId        String?
+  discountCodes     String?
+  shippingLines     String?
+
+  lineItems LineItem[]
+  credential ShopifyCredential? @relation(fields: [credentialId], references: [id])
+}
+
+model LineItem {
+  id               Int       @id @default(autoincrement())
+  orderId          Int
+  shopifyId        String    @unique
+  productId        String?
+  variantId        String?
+  title            String
+  sku              String?
+  quantity         Int
+  price            Decimal
+  totalDiscount    Decimal
+  discountedTotal  Decimal?
+  fulfillmentStatus String?
+  landingCost      Decimal?
+  netPayment       Decimal?
+  createdAt        DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id          Int       @id @default(autoincrement())
+  shopifyId   String    @unique
+  clientId    String
+  credentialId Int?
+  title       String
+  handle      String?
+  vendor      String?
+  productType String?
+  status      String?
+  tags        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime
+
+  variants Variant[]
+  credential ShopifyCredential? @relation(fields: [credentialId], references: [id])
+}
+
+model Variant {
+  id               Int       @id @default(autoincrement())
+  shopifyId        String    @unique
+  productId        Int
+  sku              String?
+  title            String?
+  barcode          String?
+  price            Decimal?
+  compareAtPrice   Decimal?
+  inventoryCost    Decimal?
+  inventoryQuantity Int?
+  inventoryItemId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }

@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Card } from '../ui/Card';
 import { Icons } from '../ui/Icons';
+import { ShopifySettings } from './ShopifySettings';
+
+interface SettingsProps {
+  clientId?: string;
+  clientName?: string;
+}
 
 interface IntegrationItem {
   id: string;
@@ -155,7 +161,7 @@ const IntegrationRow: React.FC<{ item: IntegrationItem }> = ({ item }) => {
   );
 };
 
-export const Settings: React.FC = () => {
+export const Settings: React.FC<SettingsProps> = ({ clientId, clientName }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showModalApiKey, setShowModalApiKey] = useState(false);
@@ -285,6 +291,8 @@ export const Settings: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <ShopifySettings clientId={clientId || 'default-client'} clientName={clientName} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* E-commerce Core */}

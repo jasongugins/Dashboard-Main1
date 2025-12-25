@@ -57,6 +57,9 @@ export const DashboardLayout: React.FC = () => {
     .filter((client) => selectedClients.includes(client.id))
     .map((client) => client.name);
 
+  const primaryClientId = selectedClients[0] || clients[0].id;
+  const primaryClientName = selectedClientNames[0] || clients.find((c) => c.id === primaryClientId)?.name;
+
   const clientSummary = () => {
     if (selectedClients.length === clients.length) return 'All clients';
     if (selectedClientNames.length <= 2) return selectedClientNames.join(', ');
@@ -75,7 +78,7 @@ export const DashboardLayout: React.FC = () => {
       case ViewState.COMPLIANCE:
         return <Compliance />;
       case ViewState.SETTINGS:
-        return <Settings />;
+        return <Settings clientId={primaryClientId} clientName={primaryClientName} />;
       default:
         return <Overview />;
     }
