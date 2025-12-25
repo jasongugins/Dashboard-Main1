@@ -12,6 +12,17 @@ export const DashboardLayout: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.OVERVIEW);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
+  const buildLast30 = () => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 30);
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+      label: 'Last 30 Days',
+    };
+  };
+  const [dateRange, setDateRange] = useState(buildLast30);
 
   const clients: Client[] = [
     { id: 'gymshark', name: 'GymShark (DTC)', segment: 'Athleisure' },
@@ -70,7 +81,7 @@ export const DashboardLayout: React.FC = () => {
   const renderView = () => {
     switch (currentView) {
       case ViewState.OVERVIEW:
-        return <Overview />;
+        return <Overview dateRange={dateRange} />;
       case ViewState.ATTRIBUTION:
         return <Attribution />;
       case ViewState.PROFITABILITY:
@@ -176,10 +187,13 @@ export const DashboardLayout: React.FC = () => {
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>
              </div>
              <div className="h-4 w-px bg-slate-200"></div>
-             <div className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded-md transition-colors">
-                <span className="text-sm font-medium text-slate-500">Oct 2025</span>
+             <button
+               onClick={() => setDateRange(buildLast30())}
+               className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded-md transition-colors border border-slate-200 bg-white"
+             >
+                <span className="text-sm font-medium text-slate-500">{dateRange.label}</span>
                 <Icons.ChevronDown size={14} className="text-slate-400" />
-             </div>
+             </button>
           </div>
         </header>
 

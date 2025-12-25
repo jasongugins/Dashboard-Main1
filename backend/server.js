@@ -32,6 +32,19 @@ const typeDefs = `#graphql
     hasMore: Boolean
   }
 
+  type DashboardMetrics {
+    totalRevenue: Float!
+    totalOrders: Int!
+    averageOrderValue: Float!
+    totalProducts: Int!
+  }
+
+  type SalesPoint {
+    date: String!
+    revenue: Float!
+    orders: Int!
+  }
+
   input ShopifyCredentialInput {
     clientId: String!
     storeDomain: String!
@@ -45,8 +58,16 @@ const typeDefs = `#graphql
     endDate: String
   }
 
+  input DashboardInput {
+    clientId: String!
+    startDate: String
+    endDate: String
+  }
+
   type Query {
     health: String!
+    getDashboardMetrics(input: DashboardInput!): DashboardMetrics!
+    getSalesChartData(input: DashboardInput!): [SalesPoint!]!
   }
 
   type Mutation {
@@ -235,6 +256,17 @@ const shopifyRequest = async (credential, query, variables) => {
 
 const dec = (value) => new Prisma.Decimal(value || 0);
 const money = (set) => dec(set?.presentmentMoney?.amount || 0);
+const toNumber = (value) => (value instanceof Prisma.Decimal ? value.toNumber() : Number(value || 0));
+
+const withinDates = (startDate, endDate) => {
+  const where = {};
+  if (startDate || endDate) {
+    where.processedAt = {};
+    if (startDate) where.processedAt.gte = new Date(startDate);
+    if (endDate) where.processedAt.lte = new Date(endDate);
+  }
+  return where;
+};
 
 const syncProducts = async (credential) => {
   let cursor = null;
@@ -485,9 +517,51 @@ const syncShopifyData = async ({ clientId, startDate, endDate }) => {
   }
 };
 
+const getDashboardMetrics = async ({ clientId, startDate, endDate }) => {
+  const dateWhere = withinDates(startDate, endDate);
+  const where = { clientId, ...dateWhere };
+
+  const revenueAgg = await prisma.order.aggregate({ where, _sum: { totalPrice: true }, _count: { _all: true } });
+  const totalRevenue = toNumber(revenueAgg._sum.totalPrice);
+  const totalOrders = revenueAgg._count._all || 0;
+  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const totalProducts = await prisma.product.count({ where: { clientId } });
+
+  return {
+    totalRevenue,
+    totalOrders,
+    averageOrderValue,
+    totalProducts,
+  };
+};
+
+const getSalesChartData = async ({ clientId, startDate, endDate }) => {
+  const dateWhere = withinDates(startDate, endDate);
+  const orders = await prisma.order.findMany({
+    where: { clientId, ...dateWhere },
+    select: { processedAt: true, totalPrice: true },
+    orderBy: { processedAt: 'asc' },
+  });
+
+  const byDay = new Map();
+  for (const o of orders) {
+    const day = o.processedAt.toISOString().slice(0, 10);
+    const entry = byDay.get(day) || { revenue: 0, orders: 0 };
+    entry.revenue += toNumber(o.totalPrice);
+    entry.orders += 1;
+    byDay.set(day, entry);
+  }
+
+  return Array.from(byDay.entries())
+    .sort(([a], [b]) => (a > b ? 1 : -1))
+    .map(([date, v]) => ({ date, revenue: v.revenue, orders: v.orders }));
+};
+
 const resolvers = {
   Query: {
     health: () => 'ok',
+    getDashboardMetrics: async (_, { input }) => getDashboardMetrics(input),
+    getSalesChartData: async (_, { input }) => getSalesChartData(input),
   },
   Mutation: {
     testShopifyConnection: async (_, { input }) => {
