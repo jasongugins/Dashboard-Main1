@@ -7,13 +7,6 @@ import { useProfitability } from '../../hooks/useProfitability';
 const currency = (v: number) => `$${(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const percent = (v: number) => `${(v || 0).toFixed(1)}%`;
 
-const buildLast30 = () => {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(end.getDate() - 30);
-  return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), label: 'Last 30 Days' };
-};
-
 const sortOptions = [
   { value: 'profit', label: 'Profit' },
   { value: 'marginPct', label: 'Margin %' },
@@ -23,10 +16,10 @@ const sortOptions = [
 
 interface ProfitabilityProps {
   clientId: string;
+  dateRange: { startDate?: string; endDate?: string; label?: string };
 }
 
-export const Profitability: React.FC<ProfitabilityProps> = ({ clientId }) => {
-  const [dateRange, setDateRange] = useState(buildLast30);
+export const Profitability: React.FC<ProfitabilityProps> = ({ clientId, dateRange }) => {
   const [sortBy, setSortBy] = useState('profit');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -46,13 +39,10 @@ export const Profitability: React.FC<ProfitabilityProps> = ({ clientId }) => {
           <p className="text-slate-500 text-sm mt-1">Real-time profit using synced revenue and COGS.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setDateRange(buildLast30())}
-            className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-          >
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600">
             <Icons.Calendar size={14} className="text-slate-400" />
-            {dateRange.label}
-          </button>
+            {dateRange.label || 'Custom'}
+          </div>
           <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1">
             <select
               value={sortBy}

@@ -12,17 +12,20 @@ export const DashboardLayout: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.OVERVIEW);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
-  const buildLast30 = () => {
+  const buildRange = (key: '7d' | '30d' | '12m' | 'all') => {
     const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 30);
-    return {
-      startDate: start.toISOString().slice(0, 10),
-      endDate: end.toISOString().slice(0, 10),
-      label: 'Last 30 Days',
-    };
+    const toStr = (d: Date) => d.toISOString().slice(0, 10);
+    if (key === 'all') {
+      return { startDate: undefined, endDate: toStr(end), label: 'All Time' };
+    }
+    const start = new Date(end);
+    if (key === '7d') start.setDate(end.getDate() - 7);
+    else if (key === '30d') start.setDate(end.getDate() - 30);
+    else if (key === '12m') start.setDate(end.getDate() - 365);
+    return { startDate: toStr(start), endDate: toStr(end), label: key === '7d' ? 'Last 7 Days' : key === '30d' ? 'Last 30 Days' : 'Last 12 Months' };
   };
-  const [dateRange, setDateRange] = useState(buildLast30);
+  const [dateRange, setDateRange] = useState(() => buildRange('30d'));
+  const [dateRangeKey, setDateRangeKey] = useState<'7d' | '30d' | '12m' | 'all'>('30d');
 
   const clients: Client[] = [
     { id: 'gymshark', name: 'GymShark (DTC)', segment: 'Athleisure' },
@@ -187,13 +190,23 @@ export const DashboardLayout: React.FC = () => {
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>
              </div>
              <div className="h-4 w-px bg-slate-200"></div>
-             <button
-               onClick={() => setDateRange(buildLast30())}
-               className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded-md transition-colors border border-slate-200 bg-white"
-             >
-                <span className="text-sm font-medium text-slate-500">{dateRange.label}</span>
-                <Icons.ChevronDown size={14} className="text-slate-400" />
-             </button>
+             <div className="flex items-center gap-2 cursor-pointer hover:bg-white px-2 py-1 rounded-md transition-colors border border-slate-200 bg-white">
+               <Icons.Calendar size={14} className="text-slate-400" />
+               <select
+                 value={dateRangeKey}
+                 onChange={(e) => {
+                   const key = e.target.value as '7d' | '30d' | '12m' | 'all';
+                   setDateRangeKey(key);
+                   setDateRange(buildRange(key));
+                 }}
+                 className="text-sm font-medium text-slate-600 bg-transparent focus:outline-none"
+               >
+                 <option value="7d">Last 7 Days</option>
+                 <option value="30d">Last 30 Days</option>
+                 <option value="12m">Last 12 Months</option>
+                 <option value="all">All Time</option>
+               </select>
+             </div>
           </div>
         </header>
 
