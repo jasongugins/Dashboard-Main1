@@ -230,7 +230,7 @@ const SHOPIFY_PRODUCT_QUERY = `#graphql
 
 const SHOPIFY_ORDER_QUERY = `#graphql
   query Orders($cursor: String, $query: String) {
-    orders(first: 50, after: $cursor, query: $query) {
+    orders(first: 250, after: $cursor, query: $query) {
       edges {
         cursor
         node {
@@ -244,6 +244,7 @@ const SHOPIFY_ORDER_QUERY = `#graphql
           currentTotalDiscountsSet { presentmentMoney { amount } }
           currentTotalTaxSet { presentmentMoney { amount } }
           currentTotalPriceSet { presentmentMoney { amount } }
+          displayFinancialStatus
           discountApplications(first: 5) {
             edges {
               node {
@@ -310,13 +311,23 @@ const shopifyRequest = async (credential, query, variables) => {
 const dec = (value) => new Prisma.Decimal(value || 0);
 const money = (set) => dec(set?.presentmentMoney?.amount || 0);
 const toNumber = (value) => (value instanceof Prisma.Decimal ? value.toNumber() : Number(value || 0));
+const paidStatuses = ['paid', 'partially_paid'];
+const withPaidStatus = (where) => ({
+  ...where,
+  financialStatus: { in: paidStatuses },
+});
 
 const withinDates = (startDate, endDate) => {
   const where = {};
   if (startDate || endDate) {
     where.processedAt = {};
     if (startDate) where.processedAt.gte = new Date(startDate);
-    if (endDate) where.processedAt.lte = new Date(endDate);
+    if (endDate) {
+      // Add 1 day and use lt (strictly less than) to include full day
+      const nextDay = new Date(endDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      where.processedAt.lt = nextDay;
+    }
   }
   return where;
 };
@@ -448,8 +459,8 @@ const syncOrders = async (credential, startDate, endDate) => {
           totalShipping,
           totalTax,
           netPayment,
-          fulfillmentStatus: o.fulfillmentStatus || null,
-          financialStatus: o.financialStatus ? String(o.financialStatus).toLowerCase() : null,
+          fulfillmentStatus: null,
+          financialStatus: o.displayFinancialStatus ? String(o.displayFinancialStatus).toLowerCase() : null,
           processedAt: new Date(o.processedAt),
           updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(o.processedAt),
           orderNumber: o.name ? parseInt(o.name.replace(/[^0-9]/g, ''), 10) || null : null,
@@ -469,8 +480,8 @@ const syncOrders = async (credential, startDate, endDate) => {
           totalShipping,
           totalTax,
           netPayment,
-          fulfillmentStatus: o.fulfillmentStatus || null,
-          financialStatus: o.financialStatus ? String(o.financialStatus).toLowerCase() : null,
+          fulfillmentStatus: null,
+          financialStatus: o.displayFinancialStatus ? String(o.displayFinancialStatus).toLowerCase() : null,
           processedAt: new Date(o.processedAt),
           updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(o.processedAt),
           orderNumber: o.name ? parseInt(o.name.replace(/[^0-9]/g, ''), 10) || null : null,
@@ -572,7 +583,20 @@ const syncShopifyData = async ({ clientId, startDate, endDate }) => {
 
 const getDashboardMetrics = async ({ clientId, startDate, endDate }) => {
   const dateWhere = withinDates(startDate, endDate);
-  const where = { clientId, ...dateWhere };
+  const where = withPaidStatus({ clientId, ...dateWhere });
+
+  console.log("---------------- DEBUG X-RAY ----------------");
+  console.log("Incoming Dates:", { startDate, endDate });
+  console.log("Generated WHERE Clause:", JSON.stringify(where, null, 2));
+  const allOrdersForClient = await prisma.order.findMany({
+    where: { clientId },
+    select: { id: true, processedAt: true, financialStatus: true, totalPrice: true },
+    orderBy: { processedAt: 'desc' },
+    take: 10,
+  });
+  console.log("Recent Orders in DB for clientId:", clientId);
+  allOrdersForClient.forEach(o => console.log(`  id=${o.id} processed=${o.processedAt.toISOString()} status=${o.financialStatus} total=${o.totalPrice}`));
+  console.log("---------------------------------------------");
 
   const revenueAgg = await prisma.order.aggregate({ where, _sum: { totalPrice: true }, _count: { _all: true } });
   const totalRevenue = toNumber(revenueAgg._sum.totalPrice);
@@ -591,7 +615,7 @@ const getDashboardMetrics = async ({ clientId, startDate, endDate }) => {
 const getSalesChartData = async ({ clientId, startDate, endDate }) => {
   const dateWhere = withinDates(startDate, endDate);
   const orders = await prisma.order.findMany({
-    where: { clientId, ...dateWhere },
+    where: withPaidStatus({ clientId, ...dateWhere }),
     select: { processedAt: true, totalPrice: true },
     orderBy: { processedAt: 'asc' },
   });
@@ -612,14 +636,14 @@ const getSalesChartData = async ({ clientId, startDate, endDate }) => {
 
 const getProfitMetrics = async ({ clientId, startDate, endDate }) => {
   const dateWhere = withinDates(startDate, endDate);
-  const orderWhere = { clientId, ...dateWhere };
+  const orderWhere = withPaidStatus({ clientId, ...dateWhere });
 
   const revenueAgg = await prisma.order.aggregate({ where: orderWhere, _sum: { totalPrice: true } });
   const revenue = toNumber(revenueAgg._sum.totalPrice);
 
   const lineItems = await prisma.lineItem.findMany({
     where: {
-      order: { clientId, ...dateWhere },
+      order: withPaidStatus({ clientId, ...dateWhere }),
     },
     select: { landingCost: true },
   });
@@ -634,7 +658,7 @@ const getSkuPerformance = async ({ clientId, startDate, endDate, sortBy, sortDir
   const dateWhere = withinDates(startDate, endDate);
   const items = await prisma.lineItem.findMany({
     where: {
-      order: { clientId, ...dateWhere },
+      order: withPaidStatus({ clientId, ...dateWhere }),
     },
     select: {
       productId: true,
