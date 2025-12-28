@@ -41,6 +41,17 @@ const TEST_CONNECTION_MUTATION = `#graphql
   }
 `;
 
+const SAVE_CREDENTIALS_MUTATION = `#graphql
+  mutation SaveShopifyCredentials($input: ShopifyCredentialInput!) {
+    saveShopifyCredentials(input: $input) {
+      ok
+      message
+      shopName
+      domain
+    }
+  }
+`;
+
 const SYNC_MUTATION = `#graphql
   mutation SyncShopifyData($input: SyncInput!) {
     syncShopifyData(input: $input) {
@@ -74,6 +85,7 @@ export const useShopify = ({
   });
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const isConnected = state.status === 'connected';
   const isConnecting = state.status === 'connecting';
@@ -121,6 +133,54 @@ export const useShopify = ({
         });
       } catch (error: any) {
         setState((prev) => ({ ...prev, status: 'error', error: error?.message || 'Network error' }));
+      }
+    },
+    [clientId, state.lastSync]
+  );
+
+  const saveCredentials = useCallback(
+    async ({ storeDomain, accessToken, apiVersion }: TestConnectionInput) => {
+      setIsSaving(true);
+      setState((prev) => ({ ...prev, error: undefined }));
+      try {
+        const response = await fetch('/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: SAVE_CREDENTIALS_MUTATION,
+            variables: {
+              input: {
+                clientId,
+                storeDomain,
+                accessToken,
+                apiVersion,
+              },
+            },
+          }),
+        });
+
+        const payload = await response.json();
+        if (!payload?.data?.saveShopifyCredentials?.ok) {
+          const message = payload?.data?.saveShopifyCredentials?.message || payload?.errors?.[0]?.message || 'Save failed';
+          setState((prev) => ({ ...prev, status: 'error', error: message }));
+          return { ok: false, message };
+        }
+
+        const result = payload.data.saveShopifyCredentials;
+        setState({
+          status: 'connected',
+          shopName: result.shopName,
+          domain: result.domain,
+          apiVersion,
+          lastSync: state.lastSync,
+        });
+        return { ok: true, message: result.message, shopName: result.shopName };
+      } catch (error: any) {
+        const message = error?.message || 'Network error';
+        setState((prev) => ({ ...prev, status: 'error', error: message }));
+        return { ok: false, message };
+      } finally {
+        setIsSaving(false);
       }
     },
     [clientId, state.lastSync]
@@ -182,12 +242,14 @@ export const useShopify = ({
       isConnected,
       isConnecting,
       isSyncing,
+      isSaving,
       testConnection: (input: TestConnectionInput) => testConnection(input),
       syncNow,
       resetError,
       updateForm,
+      saveCredentials: (input: TestConnectionInput) => saveCredentials(input),
     }),
-    [form, state, isConnected, isConnecting, isSyncing, testConnection, syncNow, resetError, updateForm]
+    [form, state, isConnected, isConnecting, isSyncing, isSaving, testConnection, syncNow, resetError, updateForm, saveCredentials]
   );
 };
 

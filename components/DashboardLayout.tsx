@@ -81,11 +81,11 @@ export const DashboardLayout: React.FC = () => {
   const renderView = () => {
     switch (currentView) {
       case ViewState.OVERVIEW:
-        return <Overview dateRange={dateRange} />;
+        return <Overview clientId={primaryClientId} dateRange={dateRange} />;
       case ViewState.ATTRIBUTION:
         return <Attribution />;
       case ViewState.PROFITABILITY:
-        return <Profitability />;
+        return <Profitability clientId={primaryClientId} />;
       case ViewState.COMPLIANCE:
         return <Compliance />;
       case ViewState.SETTINGS:

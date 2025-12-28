@@ -45,6 +45,23 @@ const typeDefs = `#graphql
     orders: Int!
   }
 
+  type ProfitMetrics {
+    revenue: Float!
+    cost: Float!
+    profit: Float!
+    marginPct: Float!
+  }
+
+  type SkuPerformance {
+    productId: ID!
+    name: String!
+    unitsSold: Int!
+    revenue: Float!
+    cost: Float!
+    profit: Float!
+    marginPct: Float!
+  }
+
   input ShopifyCredentialInput {
     clientId: String!
     storeDomain: String!
@@ -64,15 +81,32 @@ const typeDefs = `#graphql
     endDate: String
   }
 
+  input ProfitInput {
+    clientId: String!
+    startDate: String
+    endDate: String
+  }
+
+  input SkuPerformanceInput {
+    clientId: String!
+    startDate: String
+    endDate: String
+    sortBy: String
+    sortDir: String
+  }
+
   type Query {
     health: String!
     getDashboardMetrics(input: DashboardInput!): DashboardMetrics!
     getSalesChartData(input: DashboardInput!): [SalesPoint!]!
+    getProfitMetrics(input: ProfitInput!): ProfitMetrics!
+    getSkuPerformance(input: SkuPerformanceInput!): [SkuPerformance!]!
   }
 
   type Mutation {
     testShopifyConnection(input: ShopifyCredentialInput!): ShopifyConnectionResult!
     syncShopifyData(input: SyncInput!): SyncResult!
+    saveShopifyCredentials(input: ShopifyCredentialInput!): ShopifyConnectionResult!
   }
 `;
 
@@ -152,6 +186,11 @@ const testConnection = async ({ clientId, storeDomain, accessToken, apiVersion }
   }
 };
 
+const saveShopifyCredentials = async ({ clientId, storeDomain, accessToken, apiVersion }) => {
+  const result = await testConnection({ clientId, storeDomain, accessToken, apiVersion });
+  return result;
+};
+
 const SHOPIFY_PRODUCT_QUERY = `#graphql
   query Products($cursor: String) {
     products(first: 100, after: $cursor) {
@@ -201,15 +240,30 @@ const SHOPIFY_ORDER_QUERY = `#graphql
           updatedAt
           currencyCode
           totalPriceSet { presentmentMoney { amount } }
-          currentSubtotalLineItemsSet { presentmentMoney { amount } }
+          currentSubtotalPriceSet { presentmentMoney { amount } }
           currentTotalDiscountsSet { presentmentMoney { amount } }
           currentTotalTaxSet { presentmentMoney { amount } }
-          currentTotalShippingPriceSet { presentmentMoney { amount } }
           currentTotalPriceSet { presentmentMoney { amount } }
-          financialStatus
-          fulfillmentStatus
-          discountCodes { code amount }
-          shippingLines { title priceSet { presentmentMoney { amount } } }
+          discountApplications(first: 5) {
+            edges {
+              node {
+                ... on DiscountCodeApplication {
+                  code
+                }
+                value {
+                  ... on MoneyV2 { amount }
+                }
+              }
+            }
+          }
+          shippingLines(first: 1) {
+            edges {
+              node {
+                title
+                originalPriceSet { shopMoney { amount } }
+              }
+            }
+          }
           lineItems(first: 100) {
             edges {
               node {
@@ -220,7 +274,6 @@ const SHOPIFY_ORDER_QUERY = `#graphql
                 quantity
                 originalUnitPriceSet { presentmentMoney { amount } }
                 totalDiscountSet { presentmentMoney { amount } }
-                fulfillmentStatus
                 discountedTotalSet { presentmentMoney { amount } }
               }
             }
@@ -396,7 +449,7 @@ const syncOrders = async (credential, startDate, endDate) => {
           totalTax,
           netPayment,
           fulfillmentStatus: o.fulfillmentStatus || null,
-          financialStatus: o.financialStatus || null,
+          financialStatus: o.financialStatus ? String(o.financialStatus).toLowerCase() : null,
           processedAt: new Date(o.processedAt),
           updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(o.processedAt),
           orderNumber: o.name ? parseInt(o.name.replace(/[^0-9]/g, ''), 10) || null : null,
@@ -417,7 +470,7 @@ const syncOrders = async (credential, startDate, endDate) => {
           totalTax,
           netPayment,
           fulfillmentStatus: o.fulfillmentStatus || null,
-          financialStatus: o.financialStatus || null,
+          financialStatus: o.financialStatus ? String(o.financialStatus).toLowerCase() : null,
           processedAt: new Date(o.processedAt),
           updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(o.processedAt),
           orderNumber: o.name ? parseInt(o.name.replace(/[^0-9]/g, ''), 10) || null : null,
@@ -557,11 +610,83 @@ const getSalesChartData = async ({ clientId, startDate, endDate }) => {
     .map(([date, v]) => ({ date, revenue: v.revenue, orders: v.orders }));
 };
 
+const getProfitMetrics = async ({ clientId, startDate, endDate }) => {
+  const dateWhere = withinDates(startDate, endDate);
+  const orderWhere = { clientId, ...dateWhere };
+
+  const revenueAgg = await prisma.order.aggregate({ where: orderWhere, _sum: { totalPrice: true } });
+  const revenue = toNumber(revenueAgg._sum.totalPrice);
+
+  const lineItems = await prisma.lineItem.findMany({
+    where: {
+      order: { clientId, ...dateWhere },
+    },
+    select: { landingCost: true },
+  });
+  const cost = lineItems.reduce((acc, li) => acc + toNumber(li.landingCost), 0);
+  const profit = revenue - cost;
+  const marginPct = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+  return { revenue, cost, profit, marginPct };
+};
+
+const getSkuPerformance = async ({ clientId, startDate, endDate, sortBy, sortDir }) => {
+  const dateWhere = withinDates(startDate, endDate);
+  const items = await prisma.lineItem.findMany({
+    where: {
+      order: { clientId, ...dateWhere },
+    },
+    select: {
+      productId: true,
+      title: true,
+      quantity: true,
+      price: true,
+      totalDiscount: true,
+      discountedTotal: true,
+      landingCost: true,
+    },
+  });
+
+  const products = await prisma.product.findMany({ where: { clientId } });
+  const nameByProductId = new Map(products.map((p) => [p.shopifyId, p.title]));
+
+  const agg = new Map();
+  for (const li of items) {
+    const id = li.productId || 'unknown';
+    const prev = agg.get(id) || { unitsSold: 0, revenue: 0, cost: 0, name: nameByProductId.get(id) || li.title || 'Unknown SKU' };
+    const revenue = li.discountedTotal ? toNumber(li.discountedTotal) : toNumber(li.price) - toNumber(li.totalDiscount);
+    const cost = toNumber(li.landingCost);
+    prev.unitsSold += li.quantity || 0;
+    prev.revenue += revenue;
+    prev.cost += cost;
+    agg.set(id, prev);
+  }
+
+  const rows = Array.from(agg.entries()).map(([productId, v]) => {
+    const profit = v.revenue - v.cost;
+    const marginPct = v.revenue > 0 ? (profit / v.revenue) * 100 : 0;
+    return { productId, name: v.name, unitsSold: v.unitsSold, revenue: v.revenue, cost: v.cost, profit, marginPct };
+  });
+
+  const sortKey = sortBy && ['profit', 'marginPct', 'revenue', 'unitsSold'].includes(sortBy) ? sortBy : 'profit';
+  const dir = sortDir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    const av = a[sortKey];
+    const bv = b[sortKey];
+    if (av === bv) return 0;
+    return av > bv ? dir : -dir;
+  });
+
+  return rows;
+};
+
 const resolvers = {
   Query: {
     health: () => 'ok',
     getDashboardMetrics: async (_, { input }) => getDashboardMetrics(input),
     getSalesChartData: async (_, { input }) => getSalesChartData(input),
+    getProfitMetrics: async (_, { input }) => getProfitMetrics(input),
+    getSkuPerformance: async (_, { input }) => getSkuPerformance(input),
   },
   Mutation: {
     testShopifyConnection: async (_, { input }) => {
@@ -569,6 +694,9 @@ const resolvers = {
     },
     syncShopifyData: async (_, { input }) => {
       return syncShopifyData(input);
+    },
+    saveShopifyCredentials: async (_, { input }) => {
+      return saveShopifyCredentials(input);
     },
   },
 };

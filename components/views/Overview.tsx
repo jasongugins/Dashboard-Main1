@@ -12,7 +12,7 @@ const useSalesData = (sales: { date: string; revenue: number; orders: number }[]
   sales.map((s) => ({ name: s.date.slice(5), revenue: s.revenue, orders: s.orders }));
 
 interface OverviewProps {
-  clientId?: string;
+  clientId: string;
   dateRange: { startDate: string; endDate: string; label?: string };
 }
 
@@ -66,7 +66,7 @@ const StrategicCard = ({ title, competitor, reality, us, icon: Icon, colorClass 
   </div>
 );
 
-export const Overview: React.FC<OverviewProps> = ({ clientId = 'default-client', dateRange }) => {
+export const Overview: React.FC<OverviewProps> = ({ clientId, dateRange }) => {
   const { metrics, sales, loading, error } = useDashboardMetrics(clientId, dateRange.startDate, dateRange.endDate);
   const chartData = useMemo(() => useSalesData(sales || []), [sales]);
 

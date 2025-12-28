@@ -1,145 +1,186 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card } from '../ui/Card';
 import { Icons } from '../ui/Icons';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ReferenceLine, CartesianGrid } from 'recharts';
+import { useProfitability } from '../../hooks/useProfitability';
 
-const profitData = [
-  { name: 'Campaign A', revenue: 4000, cost: 2400, profit: 1600 },
-  { name: 'Campaign B', revenue: 3000, cost: 2800, profit: 200 },
-  { name: 'Campaign C', revenue: 2000, cost: 2200, profit: -200 },
-  { name: 'Campaign D', revenue: 5500, cost: 3000, profit: 2500 },
+const currency = (v: number) => `$${(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const percent = (v: number) => `${(v || 0).toFixed(1)}%`;
+
+const buildLast30 = () => {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 30);
+  return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), label: 'Last 30 Days' };
+};
+
+const sortOptions = [
+  { value: 'profit', label: 'Profit' },
+  { value: 'marginPct', label: 'Margin %' },
+  { value: 'revenue', label: 'Revenue' },
+  { value: 'unitsSold', label: 'Units Sold' },
 ];
 
-export const Profitability: React.FC = () => {
+interface ProfitabilityProps {
+  clientId: string;
+}
+
+export const Profitability: React.FC<ProfitabilityProps> = ({ clientId }) => {
+  const [dateRange, setDateRange] = useState(buildLast30);
+  const [sortBy, setSortBy] = useState('profit');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const { metrics, skus, loading, error } = useProfitability(clientId, dateRange.startDate, dateRange.endDate, sortBy, sortDir);
+
+  const chartData = useMemo(() => {
+    return skus.slice(0, 10).map((sku) => ({ name: sku.name, profit: sku.profit }));
+  }, [skus]);
+
+  const toggleSortDir = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+
   return (
     <div className="space-y-6 pb-12">
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Unit Economics & Profitability</h1>
-          <p className="text-slate-500 text-sm mt-1">Real-time POAS calculation integrating Stripe fees, COGS, and Ad Spend.</p>
+          <p className="text-slate-500 text-sm mt-1">Real-time profit using synced revenue and COGS.</p>
         </div>
-        <div className="text-left md:text-right bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-           <span className="text-xs text-slate-400 font-medium uppercase tracking-wider block mb-1">Current Margin</span>
-           <div className="flex items-center gap-2">
-             <span className="text-3xl font-bold text-slate-900">22.4%</span>
-             <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">+1.2%</span>
-           </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setDateRange(buildLast30())}
+            className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <Icons.Calendar size={14} className="text-slate-400" />
+            {dateRange.label}
+          </button>
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="text-sm text-slate-700 bg-transparent focus:outline-none"
+            >
+              {sortOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <button onClick={toggleSortDir} className="text-slate-500 hover:text-slate-800 text-xs px-1">
+              {sortDir === 'desc' ? '↓' : '↑'}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-        <div className="lg:col-span-1 space-y-6">
-           {/* Added bg-slate-900 fallback to ensure it's never transparent/black-on-black if gradient fails */}
-           <Card className="bg-slate-900 bg-gradient-to-br from-slate-900 to-brand-900 text-white border-slate-800 shadow-xl">
-             <div className="p-2">
-               <div className="flex items-center gap-2 mb-4 opacity-80">
-                  <Icons.BadgeDollarSign size={16} className="text-emerald-400" />
-                  <h3 className="text-slate-300 text-xs uppercase tracking-wider font-semibold">Net Profit</h3>
-               </div>
-               
-               <div className="flex items-baseline gap-2">
-                 <span className="text-3xl font-bold text-white tracking-tight">$12,450</span>
-               </div>
-               
-               <div className="mt-6 space-y-3">
-                 <div className="flex justify-between text-sm">
-                   <span className="text-slate-400">Revenue</span>
-                   <span className="font-mono text-slate-200">$84,300</span>
-                 </div>
-                 <div className="flex justify-between text-sm">
-                   <span className="text-slate-400">Ad Spend</span>
-                   <span className="font-mono text-rose-300">-$24,100</span>
-                 </div>
-                 <div className="flex justify-between text-sm">
-                   <span className="text-slate-400">COGS</span>
-                   <span className="font-mono text-slate-200">-$38,500</span>
-                 </div>
-                 <div className="flex justify-between text-sm">
-                   <span className="text-slate-400">Fees/Ship</span>
-                   <span className="font-mono text-slate-200">-$9,250</span>
-                 </div>
-                 <div className="h-px bg-slate-700/50 my-2"></div>
-                 <div className="flex justify-between text-sm font-semibold">
-                   <span className="text-emerald-400">Profit</span>
-                   <span className="font-mono text-emerald-400">$12,450</span>
-                 </div>
-               </div>
-             </div>
-           </Card>
+      {error && (
+        <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg p-2">{error}</div>
+      )}
 
-           <Card title="Data Sources">
-             <div className="space-y-4 mt-2">
-               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
-                 <div className="flex items-center gap-3">
-                   <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div>
-                   <span className="text-sm font-medium text-slate-700">Shopify Plus</span>
-                 </div>
-                 <span className="text-[10px] uppercase font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">Live</span>
-               </div>
-               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
-                 <div className="flex items-center gap-3">
-                   <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div>
-                   <span className="text-sm font-medium text-slate-700">Meta Ads</span>
-                 </div>
-                 <span className="text-[10px] uppercase font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">Live</span>
-               </div>
-               <div className="flex items-center justify-between p-3 bg-amber-50/50 rounded-lg border border-amber-100">
-                 <div className="flex items-center gap-3">
-                   <div className="relative">
-                      <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                      <div className="absolute inset-0 w-2 h-2 rounded-full bg-amber-500 animate-ping opacity-75"></div>
-                   </div>
-                   <span className="text-sm font-medium text-slate-700">Google Sheets</span>
-                 </div>
-                 <span className="text-[10px] uppercase font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">Syncing</span>
-               </div>
-             </div>
-           </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard title="Revenue" icon={<Icons.Activity size={18} className="text-emerald-500" />} value={loading ? '—' : currency(metrics?.revenue || 0)} />
+        <MetricCard title="Cost" icon={<Icons.Database size={18} className="text-rose-500" />} value={loading ? '—' : currency(metrics?.cost || 0)} />
+        <MetricCard title="Profit" icon={<Icons.BadgeDollarSign size={18} className="text-cyan-500" />} value={loading ? '—' : currency(metrics?.profit || 0)} />
+        <MetricCard title="Margin" icon={<Icons.Percent size={18} className="text-purple-500" />} value={loading ? '—' : percent(metrics?.marginPct || 0)} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+        <div className="lg:col-span-1">
+          <Card className="bg-slate-900 bg-gradient-to-br from-slate-900 to-brand-900 text-white border-slate-800 shadow-xl">
+            <div className="p-2">
+              <div className="flex items-center gap-2 mb-4 opacity-80">
+                <Icons.BadgeDollarSign size={16} className="text-emerald-400" />
+                <h3 className="text-slate-300 text-xs uppercase tracking-wider font-semibold">Net Profit</h3>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-white tracking-tight">{loading ? '—' : currency(metrics?.profit || 0)}</span>
+              </div>
+              <div className="mt-6 space-y-3 text-sm">
+                <Row label="Revenue" value={loading ? '—' : currency(metrics?.revenue || 0)} />
+                <Row label="COGS" value={loading ? '—' : currency(metrics?.cost || 0)} />
+                <div className="h-px bg-slate-700/50 my-2"></div>
+                <Row label="Margin" value={loading ? '—' : percent(metrics?.marginPct || 0)} highlight />
+              </div>
+            </div>
+          </Card>
         </div>
 
         <div className="lg:col-span-3">
-          <Card 
-            title="Campaign Profitability Analysis" 
-            subtitle="Identifying the 'Silent Burn' campaigns via Real-Time Contribution Margin" 
-            className="h-full min-h-[500px]"
-            style={{ backgroundColor: 'white' }}
+          <Card
+            title="SKU Performance"
+            subtitle="Revenue, cost, and profit by product"
+            className="h-full"
           >
-             <div className="mt-6 mb-8 h-[400px] w-full rounded-lg">
-               <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={profitData} layout="vertical" margin={{ left: 40, right: 20, top: 20, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                    <XAxis type="number" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
-                    <YAxis dataKey="name" type="category" width={100} axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 13, fontWeight: 500}} />
-                    <Tooltip 
-                      cursor={{fill: '#f8fafc'}}
-                      contentStyle={{borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', backgroundColor: '#ffffff'}}
-                    />
-                    <ReferenceLine x={0} stroke="#cbd5e1" strokeWidth={2} />
-                    <Bar dataKey="profit" barSize={32} radius={[0, 4, 4, 0]}>
-                      {profitData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.profit > 0 ? '#10b981' : '#f43f5e'} />
-                      ))}
-                    </Bar>
-                 </BarChart>
-               </ResponsiveContainer>
-             </div>
-             
-             <div className="flex items-start gap-3 mt-4 p-4 bg-rose-50 border border-rose-100 rounded-xl relative overflow-hidden">
-               <div className="absolute left-0 top-0 bottom-0 w-1 bg-rose-400"></div>
-               <Icons.AlertTriangle size={20} className="text-rose-500 mt-0.5 flex-shrink-0" />
-               <div>
-                  <h4 className="text-sm font-bold text-rose-800">Action Required</h4>
-                  <p className="text-sm text-rose-700 mt-1 leading-relaxed">
-                    "Campaign C" has a ROAS of 0.9 but is generating <span className="font-bold underline decoration-rose-400/50">negative profit</span> due to high COGS items. Pause recommended immediately to stop the bleed.
-                  </p>
-               </div>
-               <button className="ml-auto text-xs bg-white text-rose-600 px-3 py-1.5 rounded-lg border border-rose-200 font-medium hover:bg-rose-50 transition-colors shadow-sm whitespace-nowrap">
-                 Pause Campaign
-               </button>
-             </div>
+            <div className="mt-4 mb-6 h-[320px] w-full rounded-lg">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 20, top: 10, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="#f1f5f9" />
+                  <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis dataKey="name" type="category" width={120} axisLine={false} tickLine={false} tick={{ fill: '#475569', fontSize: 12, fontWeight: 500 }} />
+                  <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', backgroundColor: '#ffffff' }} />
+                  <ReferenceLine x={0} stroke="#cbd5e1" strokeWidth={2} />
+                  <Bar dataKey="profit" barSize={28} radius={[0, 4, 4, 0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.profit > 0 ? '#10b981' : '#f43f5e'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-slate-100">
+                    <th className="py-2 pr-3">Product</th>
+                    <th className="py-2 pr-3">Units</th>
+                    <th className="py-2 pr-3">Revenue</th>
+                    <th className="py-2 pr-3">Cost</th>
+                    <th className="py-2 pr-3">Profit</th>
+                    <th className="py-2 pr-3">Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && (
+                    <tr><td className="py-3 text-slate-400" colSpan={6}>Loading...</td></tr>
+                  )}
+                  {!loading && skus.length === 0 && (
+                    <tr><td className="py-3 text-slate-400" colSpan={6}>No data in range</td></tr>
+                  )}
+                  {!loading && skus.map((sku) => (
+                    <tr key={sku.productId} className="border-b border-slate-100 last:border-0">
+                      <td className="py-2 pr-3 text-slate-800 font-medium">{sku.name}</td>
+                      <td className="py-2 pr-3 text-slate-600">{sku.unitsSold}</td>
+                      <td className="py-2 pr-3 text-slate-800">{currency(sku.revenue)}</td>
+                      <td className="py-2 pr-3 text-slate-600">{currency(sku.cost)}</td>
+                      <td className="py-2 pr-3 text-slate-800">{currency(sku.profit)}</td>
+                      <td className="py-2 pr-3 text-slate-600">{percent(sku.marginPct)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
         </div>
       </div>
     </div>
   );
 };
+
+const MetricCard = ({ title, icon, value }: { title: string; icon: React.ReactNode; value: string }) => (
+  <Card className="flex flex-col justify-between">
+    <div>
+      <div className="flex justify-between items-start">
+        <div className="p-2 bg-slate-50 rounded-lg">{icon}</div>
+      </div>
+      <div className="mt-4">
+        <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">{title}</span>
+        <h2 className="text-3xl font-bold text-slate-900 mt-1">{value}</h2>
+      </div>
+    </div>
+  </Card>
+);
+
+const Row = ({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) => (
+  <div className={`flex justify-between text-sm ${highlight ? 'font-semibold text-emerald-400' : ''}`}>
+    <span className="text-slate-300">{label}</span>
+    <span className={highlight ? 'font-mono' : 'font-mono text-slate-200'}>{value}</span>
+  </div>
+);

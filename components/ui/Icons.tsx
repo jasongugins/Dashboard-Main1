@@ -29,7 +29,9 @@ import {
   FileJson,
   Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Calendar,
+  Percent
 } from 'lucide-react';
 
 export const Icons = {
@@ -67,5 +69,7 @@ export const Icons = {
   FileJson,
   Trash: Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Calendar,
+  Percent
 };
