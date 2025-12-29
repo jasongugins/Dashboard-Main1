@@ -337,11 +337,20 @@ const syncProducts = async (credential) => {
   let hasMore = true;
   let productCount = 0;
   let variantCount = 0;
+  let isFirstPage = true;
 
   while (hasMore) {
     const data = await shopifyRequest(credential, SHOPIFY_PRODUCT_QUERY, { cursor });
     const connection = data?.products;
-    if (!connection) break;
+    
+    // Safety valve: If first API call returns null/undefined, abort entirely
+    if (!connection) {
+      if (isFirstPage) {
+        throw new Error('Shopify API returned no product data. Sync aborted to protect existing data.');
+      }
+      break;
+    }
+    isFirstPage = false;
 
     for (const edge of connection.edges || []) {
       const p = edge.node;
@@ -426,6 +435,7 @@ const syncOrders = async (credential, startDate, endDate) => {
   let hasMore = true;
   let orders = 0;
   let lineItems = 0;
+  let isFirstPage = true;
   const queryString = buildOrderQueryString(startDate, endDate) || undefined;
 
   const variantCostMap = new Map();
@@ -435,7 +445,15 @@ const syncOrders = async (credential, startDate, endDate) => {
   while (hasMore) {
     const data = await shopifyRequest(credential, SHOPIFY_ORDER_QUERY, { cursor, query: queryString });
     const connection = data?.orders;
-    if (!connection) break;
+    
+    // Safety valve: If first API call returns null/undefined, abort entirely
+    if (!connection) {
+      if (isFirstPage) {
+        throw new Error('Shopify API returned no order data. Sync aborted to protect existing data.');
+      }
+      break;
+    }
+    isFirstPage = false;
 
     for (const edge of connection.edges || []) {
       const o = edge.node;
@@ -549,15 +567,76 @@ const syncOrders = async (credential, startDate, endDate) => {
   return { orders, lineItems, lastCursor: cursor, hasMore };
 };
 
+// Pre-sync health check: verify Shopify API is reachable
+const verifyShopifyConnection = async (credential) => {
+  const { endpoint } = buildShopifyUrl(credential.storeDomain, credential.apiVersion);
+  const healthQuery = `query { shop { name } }`;
+  
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': credential.accessToken,
+      },
+      body: JSON.stringify({ query: healthQuery }),
+    });
+    
+    if (!response.ok) {
+      return { ok: false, message: `Shopify API returned ${response.status}` };
+    }
+    
+    const payload = await response.json();
+    if (payload.errors?.length) {
+      return { ok: false, message: payload.errors[0].message };
+    }
+    
+    if (!payload.data?.shop?.name) {
+      return { ok: false, message: 'Invalid response from Shopify API' };
+    }
+    
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: `Connection failed: ${err.message}` };
+  }
+};
+
 const syncShopifyData = async ({ clientId, startDate, endDate }) => {
   const credential = await prisma.shopifyCredential.findUnique({ where: { clientId } });
   if (!credential) {
     return { ok: false, message: 'No credential found for client', products: 0, variants: 0, orders: 0, lineItems: 0 };
   }
 
+  // Safety valve #1: Verify Shopify is reachable before syncing
+  const healthCheck = await verifyShopifyConnection(credential);
+  if (!healthCheck.ok) {
+    console.warn(`[Sync Safety] Aborting sync for ${clientId}: ${healthCheck.message}`);
+    return { 
+      ok: false, 
+      message: `Sync aborted - API unreachable: ${healthCheck.message}. Existing data preserved.`,
+      products: 0, variants: 0, orders: 0, lineItems: 0 
+    };
+  }
+
+  // Safety valve #2: Get current counts to compare after sync
+  const beforeCounts = {
+    products: await prisma.product.count({ where: { clientId } }),
+    orders: await prisma.order.count({ where: { clientId } }),
+  };
+
   try {
     const productResult = await syncProducts(credential);
     const orderResult = await syncOrders(credential, startDate, endDate);
+
+    // Safety valve #3: Warn if sync resulted in significantly fewer records
+    const afterCounts = {
+      products: await prisma.product.count({ where: { clientId } }),
+      orders: await prisma.order.count({ where: { clientId } }),
+    };
+    
+    if (beforeCounts.orders > 0 && afterCounts.orders === 0) {
+      console.warn(`[Sync Safety] Warning: Orders went from ${beforeCounts.orders} to 0 for ${clientId}`);
+    }
 
     return {
       ok: true,
@@ -570,9 +649,11 @@ const syncShopifyData = async ({ clientId, startDate, endDate }) => {
       hasMore: orderResult.hasMore,
     };
   } catch (error) {
+    // Safety valve #4: On error, existing data is preserved (upsert doesn't delete)
+    console.error(`[Sync Safety] Sync failed for ${clientId}: ${error.message}. Existing data preserved.`);
     return {
       ok: false,
-      message: error.message,
+      message: `Sync failed: ${error.message}. Existing data preserved.`,
       products: 0,
       variants: 0,
       orders: 0,
@@ -736,7 +817,64 @@ const { url } = await startStandaloneServer(server, {
 
 console.log(`🚀 Shopify middleware ready at ${url}`);
 
+// ==================== AUTO-SYNC CRON JOB ====================
+const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS) || 15 * 60 * 1000; // Default: 15 minutes
+const AUTO_SYNC_ENABLED = process.env.AUTO_SYNC_ENABLED !== 'false'; // Default: enabled
+
+const syncAllClients = async () => {
+  const startTime = Date.now();
+  console.log('\n🔄 [Auto-Sync] Starting sync for all clients...');
+  
+  try {
+    const credentials = await prisma.shopifyCredential.findMany({
+      select: { clientId: true, storeDomain: true },
+    });
+
+    if (credentials.length === 0) {
+      console.log('🔄 [Auto-Sync] No clients found to sync.');
+      return;
+    }
+
+    console.log(`🔄 [Auto-Sync] Found ${credentials.length} client(s) to sync.`);
+
+    for (const cred of credentials) {
+      console.log(`🔄 [Auto-Sync] Syncing "${cred.clientId}" (${cred.storeDomain})...`);
+      try {
+        const result = await syncShopifyData({ clientId: cred.clientId });
+        if (result.ok) {
+          console.log(`   ✅ ${cred.clientId}: ${result.products} products, ${result.orders} orders synced.`);
+        } else {
+          console.log(`   ⚠️ ${cred.clientId}: ${result.message}`);
+        }
+      } catch (err) {
+        console.error(`   ❌ ${cred.clientId}: ${err.message}`);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`🔄 [Auto-Sync] Completed in ${elapsed}s. Next sync in ${SYNC_INTERVAL_MS / 60000} minutes.\n`);
+  } catch (err) {
+    console.error('🔄 [Auto-Sync] Fatal error:', err.message);
+  }
+};
+
+let syncIntervalId = null;
+
+if (AUTO_SYNC_ENABLED) {
+  // Run initial sync after 10 seconds (let server fully start)
+  setTimeout(() => {
+    syncAllClients();
+    // Then schedule recurring syncs
+    syncIntervalId = setInterval(syncAllClients, SYNC_INTERVAL_MS);
+  }, 10000);
+  console.log(`⏰ Auto-sync enabled. Interval: ${SYNC_INTERVAL_MS / 60000} minutes.`);
+} else {
+  console.log('⏰ Auto-sync disabled (set AUTO_SYNC_ENABLED=true to enable).');
+}
+// ============================================================
+
 const shutdown = async () => {
+  if (syncIntervalId) clearInterval(syncIntervalId);
   await prisma.$disconnect();
   process.exit(0);
 };

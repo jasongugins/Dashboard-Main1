@@ -88,7 +88,7 @@ export const DashboardLayout: React.FC = () => {
       case ViewState.ATTRIBUTION:
         return <Attribution />;
       case ViewState.PROFITABILITY:
-        return <Profitability clientId={primaryClientId} />;
+        return <Profitability clientId={primaryClientId} dateRange={dateRange} />;
       case ViewState.COMPLIANCE:
         return <Compliance />;
       case ViewState.SETTINGS:
